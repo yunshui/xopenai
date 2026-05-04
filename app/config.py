@@ -100,4 +100,18 @@ class Settings(BaseSettings):
             return cls()
         with open(json_path) as f:
             data = json.load(f)
-        return cls(**data)
+
+        # Flatten nested JSON data to match flat field names
+        # Don't flatten dict fields like model_mapping
+        dict_fields = {'model_mapping'}
+        flat_data = {}
+        for key, value in data.items():
+            if key in dict_fields:
+                flat_data[key] = value
+            elif isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    flat_key = f"{key}__{subkey}"
+                    flat_data[flat_key] = subvalue
+            else:
+                flat_data[key] = value
+        return cls(**flat_data)
