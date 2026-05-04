@@ -1,8 +1,8 @@
 # Anthropic to OpenAI API Proxy - Design Document
 
 **Date:** 2026-05-04
-**Status:** Approved
-**Version:** 1.0
+**Status:** DRAFT - Under Review
+**Version:** 1.1
 
 ## Overview
 
@@ -98,7 +98,15 @@ Client
 
 - Streaming mode uses FastAPI's `StreamingResponse`
 - Converter transforms SSE events chunk by chunk
-- On client disconnect: continue receiving, log, don't send
+- On client disconnect: cancel OpenAI request, log the disconnect event
+- Mid-stream failures: send error event and close stream gracefully
+
+### Streaming Error Handling
+
+If OpenAI fails during streaming:
+- Send a final `error` event to the client
+- Log the failure with full context
+- Close the stream with appropriate HTTP status code
 
 ### Tool Calling Flow
 
@@ -120,9 +128,6 @@ Convert back to Anthropic tools format
 
 ```json
 {
-  "anthropic": {
-    "api_endpoint": "http://localhost:8000/v1"
-  },
   "openai": {
     "api_endpoint": "https://api.openai.com/v1",
     "api_key": "${OPENAI_API_KEY}"
@@ -131,13 +136,28 @@ Convert back to Anthropic tools format
     "max_retries": 3,
     "timeout": 30,
     "retry_delay": 1,
-    "max_concurrent_requests": 50
+    "retry_backoff_multiplier": 2,
+    "max_concurrent_requests": 50,
+    "rate_limit_per_minute": 100,
+    "max_request_size_mb": 10,
+    "max_response_size_mb": 10
   },
   "logging": {
     "level": "INFO",
     "log_dir": "logs",
     "max_file_size": "10MB",
     "backup_count": 7
+  },
+  "model_mapping": {
+    "claude-3-5-sonnet-20241022": "gpt-4o",
+    "claude-3-5-haiku-20241022": "gpt-4o-mini",
+    "claude-3-opus-20240229": "gpt-4-turbo",
+    "claude-3-sonnet-20240229": "gpt-4"
+  },
+  "security": {
+    "allowed_origins": ["*"],
+    "require_authentication": false,
+    "api_key_header": "x-api-key"
   }
 }
 ```
@@ -145,10 +165,24 @@ Convert back to Anthropic tools format
 ### Environment Variables
 
 Environment variables take precedence over settings.json:
-- `OPENAI_API_KEY`: OpenAI API key
-- `LOG_LEVEL`: Override logging level
-- `MAX_RETRIES`: Override max retry count
-- `TIMEOUT`: Override timeout in seconds
+- `OPENAI_API_KEY`: OpenAI API key (required)
+- `LOG_LEVEL`: Override logging level (DEBUG, INFO, WARNING, ERROR)
+- `MAX_RETRIES`: Override max retry count (default: 3)
+- `TIMEOUT`: Override timeout in seconds (default: 30)
+- `RATE_LIMIT_PER_MINUTE`: Override rate limit (default: 100)
+
+### Model Mapping
+
+Anthropic model names are mapped to OpenAI model names using the configuration:
+
+| Anthropic Model | OpenAI Model |
+|-----------------|--------------|
+| claude-3-5-sonnet-20241022 | gpt-4o |
+| claude-3-5-haiku-20241022 | gpt-4o-mini |
+| claude-3-opus-20240229 | gpt-4-turbo |
+| claude-3-sonnet-20240229 | gpt-4 |
+
+If a model is not in the mapping, the original model name is passed through.
 
 ### Logging
 
@@ -201,10 +235,11 @@ anthropic2openai/
 │   └── test_routes.py       # Route tests
 ├── logs/                    # Log directory
 ├── docs/                    # Documentation
-│   ├── design.md            # Design document
+│   ├── design.md            # Design document (this file)
 │   ├── development.md       # Development documentation
 │   ├── testing.md           # Testing documentation
-│   └── progress.md          # Progress tracking
+│   ├── progress.md          # Progress tracking
+│   └── lessons.md           # Lessons learned
 ├── .gitignore
 ├── pyproject.toml           # Project configuration
 ├── Dockerfile
@@ -219,6 +254,90 @@ anthropic2openai/
 |--------------------|-----------------|
 | POST /v1/messages  | POST /v1/chat/completions |
 | GET /v1/models     | GET /v1/models |
+
+## Retry Logic
+
+### Retry Criteria
+
+The following error types trigger retries:
+
+| Error Type | Retryable | Max Retries |
+|------------|-----------|-------------|
+| Network timeout | Yes | 3 |
+| Connection refused | Yes | 3 |
+| 5xx errors | Yes | 3 |
+| 429 (rate limit) | Yes | 3 |
+| 4xx (except 429) | No | - |
+| Conversion errors | No | - |
+
+### Retry Behavior
+
+- **Timeout per attempt**: `timeout` setting (default 30 seconds)
+- **Total timeout**: `timeout * (max_retries + 1)` seconds
+- **Backoff strategy**: Exponential backoff with multiplier (default: 2x)
+  - Delay 1: 1 second
+  - Delay 2: 2 seconds
+  - Delay 3: 4 seconds
+
+## Authentication & Authorization
+
+### Client Authentication
+
+By default, the proxy does not require its own authentication. However, it can be configured to:
+
+1. **Validate Anthropic API keys** (optional, requires `require_authentication: true`)
+   - Validates the `x-api-key` header
+   - Rejects requests with invalid keys
+
+2. **Accept Anthropic API keys without validation** (default)
+   - Forwards the `x-api-key` header value for logging purposes
+   - Does not validate the key
+
+### OpenAI Authentication
+
+The proxy uses a single OpenAI API key configured via `OPENAI_API_KEY` environment variable. The key is not exposed to clients.
+
+## Security Configuration
+
+### CORS
+
+Configured via `security.allowed_origins` in settings.json:
+- Default: `["*"]` (allow all origins)
+- Production: Specify exact origins: `["https://example.com"]`
+
+### Security Headers
+
+The proxy includes the following security headers:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 1; mode=block`
+
+### TLS/SSL
+
+For production deployment, TLS/SSL should be configured at the reverse proxy level (nginx, Traefik, etc.).
+
+## Rate Limiting
+
+The proxy implements rate limiting to prevent API quota exhaustion:
+
+- **Default limit**: 100 requests per minute
+- **Scope**: Per client IP address
+- **Behavior**: Returns 429 status code with `Retry-After` header when exceeded
+- **Configurable**: Via `rate_limit_per_minute` setting
+
+### Concurrent Request Limits
+
+- **Default**: 50 concurrent requests
+- **Behavior**: Queues requests beyond limit, fails with 503 if queue full
+- **Configurable**: Via `max_concurrent_requests` setting
+
+## Request/Response Size Limits
+
+To prevent memory issues:
+
+- **Max request size**: 10 MB (configurable)
+- **Max response size**: 10 MB (configurable)
+- **Behavior**: Returns 413 error if exceeded
 
 ## Error Handling
 
