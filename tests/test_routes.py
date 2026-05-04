@@ -1,5 +1,6 @@
 """Tests for routes."""
 from fastapi.testclient import TestClient
+import httpx
 from app.main import app
 
 client = TestClient(app)
@@ -12,3 +13,40 @@ def test_health():
 def test_metrics():
     resp = client.get("/metrics")
     assert resp.status_code == 200
+
+
+def test_messages_endpoint():
+    import respx
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            })
+        )
+        resp = client.post("/v1/messages", json={
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
+        })
+        assert resp.status_code == 200
+        assert resp.json()["id"] == "test"
+
+
+def test_models_endpoint():
+    import respx
+    with respx.mock:
+        respx.get("https://api.openai.com/v1/models").mock(
+            return_value=httpx.Response(200, json={
+                "object": "list",
+                "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
+            })
+        )
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        assert resp.json()["object"] == "list"
+        assert len(resp.json()["data"]) == 2
