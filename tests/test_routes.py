@@ -50,3 +50,24 @@ def test_models_endpoint():
         assert resp.status_code == 200
         assert resp.json()["object"] == "list"
         assert len(resp.json()["data"]) == 2
+
+
+def test_messages_streaming():
+    import respx
+    def stream_gen():
+        yield b'data: {"id":"chat-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n'
+        yield b'data: {"id":"chat-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+        yield b'data: [DONE]\n\n'
+
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=httpx.Response(200, stream=stream_gen())
+        )
+        resp = client.post("/v1/messages", json={
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
+            "stream": True
+        })
+        assert resp.status_code == 200
+        assert b"event:" in resp.content
