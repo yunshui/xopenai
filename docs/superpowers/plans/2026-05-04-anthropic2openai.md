@@ -1,0 +1,1852 @@
+# Anthropic to OpenAI API Proxy Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-step. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build a production-ready HTTP proxy that receives Anthropic API requests and forwards them to OpenAI API with format translation.
+
+**Architecture:** Modular FastAPI application with separate layers for routing, conversion, HTTP client, and infrastructure. Follows TDD with pytest for all components.
+
+**Tech Stack:** FastAPI, httpx, pydantic-settings, pytest, pytest-asyncio, pytest-mock, respx (HTTP mocking), prometheus-client, slowapi (rate limiting)
+
+---
+
+## Task 1: Project Setup
+
+- [ ] **Step 1: Create pyproject.toml**
+
+```toml
+[project]
+name = "anthropic2openai"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "httpx>=0.25.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "prometheus-client>=0.19.0",
+    "slowapi>=0.1.9",
+    "uvicorn[standard]>=0.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
+    "respx>=0.20.0",
+    "ruff>=0.1.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+```
+
+- [ ] **Step 2: Create .gitignore**
+
+```
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+```
+
+- [ ] **Step 3: Create directory structure**
+
+Run: `mkdir -p app/{converters,routes,services,schemas} conf logs tests`
+Expected: All directories created
+
+- [ ] **Step 4: Create __init__.py files**
+
+Run: `touch app/__init__.py app/converters/__init__.py app/routes/__init__.py app/services/__init__.py app/schemas/__init__.py tests/__init__.py`
+Expected: All files created
+
+- [ ] **Step 5: Install dependencies**
+
+Run: `pip install -e ".[dev]"`
+Expected: No errors
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add .
+git commit -m "chore: project setup with dependencies and structure"
+```
+
+---
+
+## Task 2: Configuration Management
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_config.py
+import os
+import pytest
+from app.config import Settings
+
+def test_default_settings():
+    settings = Settings()
+    assert settings.openai.api_endpoint == "https://api.openai.com/v1"
+    assert settings.proxy.max_retries == 3
+
+def test_env_override(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    settings = Settings()
+    assert settings.openai.api_key == "test-key"
+    assert settings.logging.level == "DEBUG"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_config.py -v`
+Expected: FAIL with "ModuleNotFoundError"
+
+- [ ] **Step 3: Write conf/settings.json**
+
+```json
+{
+  "openai": {
+    "api_endpoint": "https://api.openai.com/v1",
+    "api_key": ""
+  },
+  "proxy": {
+    "max_retries": 3,
+    "timeout": 30,
+    "retry_delay": 1,
+    "retry_backoff_multiplier": 2,
+    "max_concurrent_requests": 50,
+    "rate_limit_per_minute": 100,
+    "max_request_size_mb": 10
+  },
+  "logging": {
+    "level": "INFO",
+    "log_dir": "logs"
+  },
+  "model_mapping": {
+    "claude-3-5-sonnet-20241022": "gpt-4o",
+    "claude-3-5-haiku-20241022": "gpt-4o-mini"
+  },
+  "security": {
+    "allowed_origins": ["*"],
+    "require_authentication": false
+  }
+}
+```
+
+- [ ] **Step 4: Write app/config.py**
+
+```python
+"""Configuration management."""
+import os
+from typing import Optional
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class OpenAIConfig(BaseSettings):
+    api_endpoint: str = "https://api.openai.com/v1"
+    api_key: str = Field(default="", env="OPENAI_API_KEY")
+
+
+class ProxyConfig(BaseSettings):
+    max_retries: int = 3
+    timeout: int = 30
+    retry_delay: float = 1.0
+    retry_backoff_multiplier: float = 2.0
+    max_concurrent_requests: int = 50
+    rate_limit_per_minute: int = 100
+    max_request_size_mb: int = 10
+
+
+class LoggingConfig(BaseSettings):
+    level: str = "INFO"
+    log_dir: str = "logs"
+
+
+class SecurityConfig(BaseSettings):
+    allowed_origins: list[str] = Field(default=["*"])
+    require_authentication: bool = False
+    api_key_header: str = "x-api-key"
+
+
+class Settings(BaseSettings):
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    model_mapping: dict[str, str] = Field(default_factory=dict)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+
+    model_config = SettingsConfigDict(
+        env_nested_delimiter="__",
+        env_file=".env",
+    )
+
+    @classmethod
+    def load_from_json(cls, path: Optional[str] = None) -> "Settings":
+        from pathlib import Path
+        import json
+        if path is None:
+            path = os.getenv("SETTINGS_PATH", "conf/settings.json")
+        json_path = Path(path)
+        if not json_path.exists():
+            return cls()
+        with open(json_path) as f:
+            data = json.load(f)
+        return cls(**data)
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `pytest tests/test_config.py -v`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add conf/settings.json app/config.py tests/test_config.py
+git commit -m "feat: add configuration management"
+```
+
+---
+
+## Task 3: Structured Logging
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_logger.py
+from app.logger import get_logger, setup_logging
+
+def test_get_logger():
+    logger = get_logger("TestModule")
+    assert logger.name == "TestModule"
+
+def test_logger_format(tmp_path, caplog):
+    setup_logging(log_dir=str(tmp_path))
+    logger = get_logger("TestClass")
+    with caplog.at_level("INFO"):
+        logger.info("Test message")
+    assert any("TestClass" in record.message for record in caplog.records)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_logger.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/logger.py**
+
+```python
+"""Structured logging utility."""
+import logging
+import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from datetime import datetime
+
+
+class StructuredFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        timestamp = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+        module_line = f"{record.name}:{record.lineno}"
+        base = f"[{timestamp}] [{record.levelname}] [{module_line}] {record.getMessage()}"
+        extra = {k: v for k, v in record.__dict__.items()
+                 if k not in {'name', 'msg', 'args', 'levelname', 'levelno',
+                              'pathname', 'filename', 'module', 'exc_info',
+                              'stack_info', 'lineno', 'funcName', 'created',
+                              'msecs', 'message', 'asctime'}}
+        if extra:
+            import json
+            base += f" | {json.dumps(extra)}"
+        return base
+
+
+_loggers: dict[str, logging.Logger] = {}
+
+
+def get_logger(name: str) -> logging.Logger:
+    if name not in _loggers:
+        _loggers[name] = logging.getLogger(name)
+    return _loggers[name]
+
+
+def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level.upper()))
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(StructuredFormatter())
+    root.addHandler(console)
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "anthropic2openai.log",
+        maxBytes=10*1024*1024, backupCount=7
+    )
+    file_handler.setFormatter(StructuredFormatter())
+    root.addHandler(file_handler)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_logger.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/logger.py tests/test_logger.py
+git commit -m "feat: add structured logging"
+```
+
+---
+
+## Task 4: Prometheus Metrics
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_metrics.py
+from app.metrics import Metrics, get_metrics
+
+def test_metrics_singleton():
+    m1 = get_metrics()
+    m2 = get_metrics()
+    assert m1 is m2
+
+def test_record_request():
+    metrics = get_metrics()
+    metrics.record_request("POST", "/v1/messages", 200)
+    assert metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="200")._value.get() == 1
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_metrics.py -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/metrics.py**
+
+```python
+"""Prometheus metrics."""
+from prometheus_client import Counter, Histogram, Gauge
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class Metrics:
+    def __init__(self) -> None:
+        self.requests_total = Counter(
+            "anthropic2openai_requests_total", "Total requests",
+            ["method", "endpoint", "status"]
+        )
+        self.request_duration = Histogram(
+            "anthropic2openai_request_duration_seconds", "Request duration",
+            ["method", "endpoint"]
+        )
+        self.conversion_errors = Counter(
+            "anthropic2openai_conversion_errors_total", "Conversion errors",
+            ["converter", "error_type"]
+        )
+        self.retries_total = Counter(
+            "anthropic2openai_retries_total", "Retries", ["endpoint"]
+        )
+        self.active_connections = Gauge(
+            "anthropic2openai_active_connections", "Active connections"
+        )
+
+    def record_request(self, method: str, endpoint: str, status: int) -> None:
+        self.requests_total.labels(method=method, endpoint=endpoint, status=status).inc()
+
+    def record_request_duration(self, method: str, endpoint: str, duration: float) -> None:
+        self.request_duration.labels(method=method, endpoint=endpoint).observe(duration)
+
+
+_metrics: Metrics | None = None
+
+
+def get_metrics() -> Metrics:
+    global _metrics
+    if _metrics is None:
+        _metrics = Metrics()
+    return _metrics
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_metrics.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/metrics.py tests/test_metrics.py
+git commit -m "feat: add Prometheus metrics"
+```
+
+---
+
+## Task 5: Data Models
+
+- [ ] **Step 1: Write app/schemas/anthropic.py**
+
+```python
+"""Anthropic API models."""
+from typing import Literal, Optional, Any
+from pydantic import BaseModel
+
+
+class AnthropicMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: list[dict[str, Any]]
+
+
+class AnthropicTool(BaseModel):
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+class AnthropicRequest(BaseModel):
+    model: str
+    max_tokens: int
+    messages: list[AnthropicMessage]
+    system: Optional[str] = None
+    tools: Optional[list[AnthropicTool]] = None
+    stream: bool = False
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+
+
+class AnthropicUsage(BaseModel):
+    input_tokens: int
+    output_tokens: int
+
+
+class AnthropicResponse(BaseModel):
+    id: str
+    type: Literal["message"] = "message"
+    role: Literal["assistant"] = "assistant"
+    content: list[dict[str, Any]]
+    model: str
+    stop_reason: Optional[str] = None
+    usage: AnthropicUsage
+
+
+class AnthropicModelsResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[dict[str, str]]
+```
+
+- [ ] **Step 2: Write app/schemas/openai.py**
+
+```python
+"""OpenAI API models."""
+from typing import Literal, Optional, Any, List
+from pydantic import BaseModel
+
+
+class OpenAIMessage(BaseModel):
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | List[dict[str, Any]]
+    tool_call_id: Optional[str] = None
+
+
+class OpenAIFunction(BaseModel):
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+
+class OpenAITool(BaseModel):
+    type: Literal["function"] = "function"
+    function: OpenAIFunction
+
+
+class OpenAIRequest(BaseModel):
+    model: str
+    messages: list[OpenAIMessage]
+    max_tokens: int
+    tools: Optional[list[OpenAITool]] = None
+    stream: bool = False
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+
+
+class OpenAIUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class OpenAIChoice(BaseModel):
+    index: int
+    message: dict[str, Any]
+    finish_reason: Optional[str] = None
+
+
+class OpenAIResponse(BaseModel):
+    id: str
+    object: Literal["chat.completion"] = "chat.completion"
+    created: int
+    model: str
+    choices: list[OpenAIChoice]
+    usage: OpenAIUsage
+
+
+class OpenAIModelsResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[dict[str, str]]
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/schemas/
+git commit -m "feat: add data models"
+```
+
+---
+
+## Task 6: Request Converter
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_converters.py
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage
+from app.schemas.openai import OpenAIRequest
+from app.converters.request import RequestConverter
+
+def test_convert_simple_message():
+    anthropic = AnthropicRequest(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[AnthropicMessage(role="user", content=[{"type": "text", "text": "Hello"}])]
+    )
+    converter = RequestConverter({"claude-3-5-sonnet-20241022": "gpt-4o"})
+    openai = converter.anthropic_to_openai(anthropic)
+    assert isinstance(openai, OpenAIRequest)
+    assert openai.model == "gpt-4o"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_converters.py::test_convert_simple_message -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/converters/request.py**
+
+```python
+"""Convert Anthropic requests to OpenAI format."""
+from typing import Any
+
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage, AnthropicTool
+from app.schemas.openai import OpenAIRequest, OpenAIMessage, OpenAITool, OpenAIFunction
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class RequestConverter:
+    def __init__(self, model_mapping: dict[str, str]) -> None:
+        self.model_mapping = model_mapping
+
+    def anthropic_to_openai(self, request: AnthropicRequest) -> OpenAIRequest:
+        openai_model = self.model_mapping.get(request.model, request.model)
+        messages: list[OpenAIMessage] = []
+        if request.system:
+            messages.append(OpenAIMessage(role="system", content=request.system))
+        for msg in request.messages:
+            messages.extend(self._convert_message(msg))
+        tools = [self._convert_tool(t) for t in request.tools] if request.tools else None
+        return OpenAIRequest(
+            model=openai_model,
+            messages=messages,
+            max_tokens=request.max_tokens,
+            tools=tools,
+            stream=request.stream,
+            temperature=request.temperature,
+            top_p=request.top_p,
+        )
+
+    def _convert_message(self, msg: AnthropicMessage) -> list[OpenAIMessage]:
+        if msg.role == "user":
+            content = "".join(b.get("text", "") for b in msg.content if b.get("type") == "text")
+            return [OpenAIMessage(role="user", content=content)]
+        elif msg.role == "assistant":
+            result: list[OpenAIMessage] = []
+            for block in msg.content:
+                if block.get("type") == "text":
+                    result.append(OpenAIMessage(role="assistant", content=block.get("text", "")))
+            return result
+        return []
+
+    def _convert_tool(self, tool: AnthropicTool | dict[str, Any]) -> OpenAITool:
+        if isinstance(tool, dict):
+            return OpenAITool(
+                type="function",
+                function=OpenAIFunction(
+                    name=tool["name"],
+                    description=tool["description"],
+                    parameters=tool["input_schema"],
+                ),
+            )
+        return OpenAITool(
+            type="function",
+            function=OpenAIFunction(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.input_schema,
+            ),
+        )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_converters.py::test_convert_simple_message -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/converters/request.py tests/test_converters.py
+git commit -m "feat: add request converter"
+```
+
+---
+
+## Task 7: Response Converter
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# Add to tests/test_converters.py
+from app.schemas.openai import OpenAIResponse, OpenAIChoice, OpenAIUsage
+from app.schemas.anthropic import AnthropicResponse
+from app.converters.response import ResponseConverter
+
+def test_convert_response():
+    openai = OpenAIResponse(
+        id="resp_123",
+        created=1234567890,
+        model="gpt-4o",
+        choices=[OpenAIChoice(
+            index=0,
+            message={"role": "assistant", "content": "Hello!"},
+            finish_reason="stop"
+        )],
+        usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    )
+    converter = ResponseConverter({"gpt-4o": "claude-3-5-sonnet-20241022"})
+    anthropic = converter.openai_to_anthropic(openai, "claude-3-5-sonnet-20241022")
+    assert anthropic.id == "resp_123"
+    assert anthropic.model == "claude-3-5-sonnet-20241022"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_converters.py::test_convert_response -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/converters/response.py**
+
+```python
+"""Convert OpenAI responses to Anthropic format."""
+import json
+from typing import Any, Generator
+
+from app.schemas.openai import OpenAIResponse
+from app.schemas.anthropic import AnthropicResponse, AnthropicUsage
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class AnthropicStreamEvent:
+    def __init__(self, event: str, data: dict[str, Any]) -> None:
+        self.event = event
+        self.data = data
+
+
+class ResponseConverter:
+    def __init__(self, model_mapping: dict[str, str]) -> None:
+        self.model_mapping = model_mapping
+
+    def openai_to_anthropic(self, response: OpenAIResponse, original_model: str) -> AnthropicResponse:
+        choice = response.choices[0]
+        message = choice.message
+        content: list[dict[str, Any]] = []
+        if isinstance(message.get("content"), str):
+            content.append({"type": "text", "text": message["content"]})
+        usage = AnthropicUsage(
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+        )
+        stop_reason = self._map_stop_reason(choice.finish_reason)
+        return AnthropicResponse(
+            id=response.id,
+            model=original_model,
+            content=content,
+            usage=usage,
+            stop_reason=stop_reason,
+        )
+
+    def convert_stream_chunk(self, chunk: dict[str, Any]) -> Generator[AnthropicStreamEvent, None, None]:
+        if not chunk.get("choices"):
+            return
+        choice = chunk["choices"][0]
+        delta = choice.get("delta", {})
+        if "content" in delta:
+            yield AnthropicStreamEvent(
+                event="content_block_delta",
+                data={
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": delta["content"]},
+                },
+            )
+        if choice.get("finish_reason"):
+            yield AnthropicStreamEvent(
+                event="message_delta",
+                data={"type": "message_delta", "delta": {"stop_reason": choice["finish_reason"]}},
+            )
+
+    def _map_stop_reason(self, openai_reason: str | None) -> str | None:
+        mapping = {"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use"}
+        return mapping.get(openai_reason) if openai_reason else None
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_converters.py::test_convert_response -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/converters/response.py
+git commit -m "feat: add response converter"
+```
+
+---
+
+## Task 8: Retry Manager
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# Add to tests/test_converters.py
+import asyncio
+import httpx
+from app.converters.retry import RetryManager, is_retryable_error
+
+def test_is_retryable_error():
+    assert is_retryable_error(500) is True
+    assert is_retryable_error(429) is True
+    assert is_retryable_error(400) is False
+
+async def test_retry_manager():
+    attempts = []
+    async def failing_request():
+        attempts.append(1)
+        if len(attempts) < 2:
+            raise httpx.TimeoutException("Timeout")
+        return httpx.Response(200, json={"id": "test"})
+    manager = RetryManager(max_retries=3, delay=0.01, backoff_multiplier=1)
+    result = await manager.execute_with_retry("/test", failing_request)
+    assert result.status_code == 200
+    assert len(attempts) == 2
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_converters.py::test_is_retryable_error tests/test_converters.py::test_retry_manager -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/converters/retry.py**
+
+```python
+"""Retry logic."""
+import asyncio
+from typing import Callable, Awaitable
+import httpx
+from app.metrics import get_metrics
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def is_retryable_error(status_code: int | None) -> bool:
+    if status_code is None:
+        return True
+    return status_code >= 500 or status_code == 429
+
+
+class RetryManager:
+    def __init__(self, max_retries: int = 3, delay: float = 1.0, backoff_multiplier: float = 2.0) -> None:
+        self.max_retries = max_retries
+        self.delay = delay
+        self.backoff_multiplier = backoff_multiplier
+        self.metrics = get_metrics()
+
+    async def execute_with_retry(
+        self, endpoint: str, request_func: Callable[[], Awaitable[httpx.Response]]
+    ) -> httpx.Response:
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await request_func()
+            except (httpx.TimeoutException, httpx.RequestError) as e:
+                last_error = e
+                logger.warning(f"Request failed (attempt {attempt + 1})", extra={"endpoint": endpoint})
+            except httpx.HTTPStatusError as e:
+                if is_retryable_error(e.response.status_code):
+                    last_error = e
+                    logger.warning(f"Retryable error {e.response.status_code}")
+                else:
+                    raise
+            if attempt < self.max_retries:
+                self.metrics.retries_total.labels(endpoint=endpoint).inc()
+                await asyncio.sleep(self.delay * (self.backoff_multiplier ** attempt))
+        raise last_error or RuntimeError("Request failed")
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_converters.py::test_is_retryable_error tests/test_converters.py::test_retry_manager -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/converters/retry.py
+git commit -m "feat: add retry manager"
+```
+
+---
+
+## Task 9: HTTP Client
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_http_client.py
+import pytest
+import respx
+from app.services.http_client import OpenAIClient
+from app.config import Settings
+
+@pytest.mark.asyncio
+async def test_send_request():
+    settings = Settings()
+    client = OpenAIClient(settings)
+
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=respx.Response(200, json={"id": "test", "choices": []})
+        )
+        response = await client.send_request("POST", "/chat/completions", json={"model": "gpt-4o"})
+        assert response.status_code == 200
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_http_client.py::test_send_request -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/services/http_client.py**
+
+```python
+"""HTTP client for OpenAI API."""
+import asyncio
+from typing import Any
+import httpx
+from app.config import Settings
+from app.converters.retry import RetryManager
+from app.metrics import get_metrics
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class OpenAIClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.endpoint = settings.openai.api_endpoint
+        self.api_key = settings.openai.api_key
+        self.timeout = settings.proxy.timeout
+        self.semaphore = asyncio.Semaphore(settings.proxy.max_concurrent_requests)
+        self.retry_manager = RetryManager(
+            max_retries=settings.proxy.max_retries,
+            delay=settings.proxy.retry_delay,
+            backoff_multiplier=settings.proxy.retry_backoff_multiplier,
+        )
+        self.metrics = get_metrics()
+        self._client: httpx.AsyncClient | None = None
+
+    async def get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client:
+            await self._client.aclose()
+
+    async def send_request(
+        self, method: str, path: str, json: dict[str, Any] | None = None, stream: bool = False
+    ) -> httpx.Response:
+        async with self.semaphore:
+            self.metrics.active_connections.inc()
+            try:
+                client = await self.get_client()
+                url = f"{self.endpoint}{path}"
+                logger.info(f"Sending {method} {path}")
+                async def _request() -> httpx.Response:
+                    resp = await client.request(
+                        method, url, json=json,
+                        headers={"Authorization": f"Bearer {self.api_key}"}
+                    )
+                    resp.raise_for_status()
+                    return resp
+                if stream:
+                    return await _request()
+                return await self.retry_manager.execute_with_retry(path, _request)
+            finally:
+                self.metrics.active_connections.dec()
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_http_client.py::test_send_request -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/services/http_client.py tests/test_http_client.py
+git commit -m "feat: add HTTP client"
+```
+
+---
+
+## Task 10: Messages Service
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# tests/test_services.py
+import pytest
+import respx
+from app.services.messages import AnthropicMessagesService
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage
+from app.config import Settings
+
+@pytest.mark.asyncio
+async def test_handle_messages():
+    settings = Settings()
+    service = AnthropicMessagesService(settings)
+    request = AnthropicRequest(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        messages=[AnthropicMessage(role="user", content=[{"type": "text", "text": "Hi"}])]
+    )
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=respx.Response(200, json={
+                "id": "chat-123",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+            })
+        )
+        response = await service.handle_messages(request)
+        assert response.id == "chat-123"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_services.py::test_handle_messages -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/services/messages.py**
+
+```python
+"""Service for /v1/messages."""
+import time
+import uuid
+from typing import AsyncGenerator
+
+from fastapi import HTTPException
+from app.config import Settings
+from app.schemas.anthropic import AnthropicRequest, AnthropicResponse
+from app.converters.request import RequestConverter
+from app.converters.response import ResponseConverter
+from app.services.http_client import OpenAIClient
+from app.logger import get_logger
+from app.metrics import get_metrics
+
+logger = get_logger(__name__)
+
+
+class AnthropicMessagesService:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.client = OpenAIClient(settings)
+        self.request_converter = RequestConverter(settings.model_mapping)
+        self.response_converter = ResponseConverter(
+            {v: k for k, v in settings.model_mapping.items()}
+        )
+        self.metrics = get_metrics()
+
+    async def handle_messages(self, request: AnthropicRequest) -> AnthropicResponse:
+        request_id = str(uuid.uuid4())
+        start_time = time.time()
+        try:
+            openai_request = self.request_converter.anthropic_to_openai(request)
+            httpx_response = await self.client.send_request(
+                "POST", "/chat/completions", json=openai_request.model_dump()
+            )
+            from app.schemas.openai import OpenAIResponse
+            openai_response = OpenAIResponse(**httpx_response.json())
+            anthropic_response = self.response_converter.openai_to_anthropic(
+                openai_response, request.model
+            )
+            duration = time.time() - start_time
+            self.metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="200").inc()
+            self.metrics.request_duration.labels(method="POST", endpoint="/v1/messages").observe(duration)
+            return anthropic_response
+        except Exception as e:
+            logger.error(f"Request failed: {e}", extra={"request_id": request_id})
+            self.metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="500").inc()
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def handle_messages_stream(self, request: AnthropicRequest) -> AsyncGenerator[str, None]:
+        request_id = str(uuid.uuid4())
+        try:
+            openai_request = self.request_converter.anthropic_to_openai(request)
+            httpx_response = await self.client.send_request(
+                "POST", "/chat/completions", json=openai_request.model_dump(), stream=True
+            )
+            async for line in httpx_response.aiter_lines():
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    chunk = __import__('json').loads(data)
+                    for event in self.response_converter.convert_stream_chunk(chunk):
+                        yield f"event: {event.event}\ndata: {__import__('json').dumps(event.data)}\n\n"
+        except Exception as e:
+            logger.error(f"Stream failed: {e}", extra={"request_id": request_id})
+            yield f'event: error\ndata: {{"type": "error", "message": "{str(e)}"}}\n\n'
+
+    async def close(self) -> None:
+        await self.client.close()
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_services.py::test_handle_messages -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/services/messages.py tests/test_services.py
+git commit -m "feat: add messages service"
+```
+
+---
+
+## Task 11: Models Service
+
+- [ ] **Step 1: Write failing test**
+
+```python
+# Add to tests/test_services.py
+from app.services.models import AnthropicModelsService
+
+@pytest.mark.asyncio
+async def test_list_models():
+    settings = Settings()
+    service = AnthropicModelsService(settings)
+    with respx.mock:
+        respx.get("https://api.openai.com/v1/models").mock(
+            return_value=respx.Response(200, json={
+                "object": "list",
+                "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
+            })
+        )
+        response = await service.handle_models()
+        assert response.object == "list"
+        assert len(response.data) == 2
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_services.py::test_list_models -v`
+Expected: FAIL
+
+- [ ] **Step 3: Write app/services/models.py**
+
+```python
+"""Service for /v1/models."""
+import time
+from app.config import Settings
+from app.schemas.anthropic import AnthropicModelsResponse
+from app.services.http_client import OpenAIClient
+from app.metrics import get_metrics
+
+class AnthropicModelsService:
+    def __init__(self, settings: Settings) -> None:
+        self.client = OpenAIClient(settings)
+        self.metrics = get_metrics()
+
+    async def handle_models(self) -> AnthropicModelsResponse:
+        start_time = time.time()
+        httpx_response = await self.client.send_request("GET", "/models")
+        openai_response = httpx_response.json()
+        data = [{"id": m["id"], "display_name": m["id"]} for m in openai_response.get("data", [])]
+        duration = time.time() - start_time
+        self.metrics.requests_total.labels(method="GET", endpoint="/v1/models", status="200").inc()
+        return AnthropicModelsResponse(object="list", data=data)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_services.py::test_list_models -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/services/models.py
+git commit -m "feat: add models service"
+```
+
+---
+
+## Task 12: Health & Metrics Routes
+
+- [ ] **Step 1: Write app/routes/health.py**
+
+```python
+"""Health check and metrics endpoints."""
+from fastapi import APIRouter
+from prometheus_client import generate_latest
+
+from app.metrics import get_metrics
+
+router = APIRouter()
+
+@router.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "anthropic2openai"}
+
+@router.get("/metrics")
+async def metrics():
+    return generate_latest()
+```
+
+- [ ] **Step 2: Write app/main.py (minimal)**
+
+```python
+"""FastAPI application."""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import Settings, setup_logging
+from app.routes.health import router as health_router
+from app.logger import get_logger
+
+settings = Settings.load_from_json()
+setup_logging(settings.logging.log_dir, settings.logging.level)
+logger = get_logger(__name__)
+
+app = FastAPI(title="Anthropic to OpenAI API Proxy", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.security.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(health_router)
+
+@app.on_event("startup")
+async def startup():
+    logger.info("Starting up")
+
+@app.on_event("shutdown")
+async def shutdown():
+    logger.info("Shutting down")
+```
+
+- [ ] **Step 3: Write test**
+
+```python
+# tests/test_routes.py
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_health():
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "healthy"
+
+def test_metrics():
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `pytest tests/test_routes.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/main.py app/routes/health.py tests/test_routes.py
+git commit -m "feat: add health and metrics endpoints"
+```
+
+---
+
+## Task 13: v1 API Routes
+
+- [ ] **Step 1: Write app/routes/v1.py**
+
+```python
+"""v1 API routes."""
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
+
+from app.config import Settings
+from app.schemas.anthropic import AnthropicRequest, AnthropicModelsResponse
+from app.services.messages import AnthropicMessagesService
+from app.services.models import AnthropicModelsService
+from app.logger import get_logger
+
+logger = get_logger(__name__)
+router = APIRouter(prefix="/v1", tags=["v1"])
+
+# Services will be set from main.py
+_messages_service: AnthropicMessagesService | None = None
+_models_service: AnthropicModelsService | None = None
+_settings: Settings | None = None
+
+
+def set_services(messages: AnthropicMessagesService, models: AnthropicModelsService, settings: Settings) -> None:
+    global _messages_service, _models_service, _settings
+    _messages_service = messages
+    _models_service = models
+    _settings = settings
+
+
+@router.post("/messages")
+async def create_message(request: AnthropicRequest, http_request: Request):
+    service = _messages_service
+    if request.stream:
+        return StreamingResponse(
+            service.handle_messages_stream(request),
+            media_type="text/event-stream",
+        )
+    return await service.handle_messages(request)
+
+
+@router.get("/models", response_model=AnthropicModelsResponse)
+async def list_models():
+    service = _models_service
+    return await service.handle_models()
+```
+
+- [ ] **Step 2: Update app/main.py**
+
+```python
+"""FastAPI application."""
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from app.config import Settings
+from app.logger import setup_logging, get_logger
+from app.routes.health import router as health_router
+from app.routes.v1 import router as v1_router, set_services
+from app.services.messages import AnthropicMessagesService
+from app.services.models import AnthropicModelsService
+import uuid
+import os
+
+settings = Settings.load_from_json()
+setup_logging(settings.logging.log_dir, settings.logging.level)
+logger = get_logger(__name__)
+
+# Services
+messages_service = AnthropicMessagesService(settings)
+models_service = AnthropicModelsService(settings)
+
+app = FastAPI(title="Anthropic to OpenAI API Proxy", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.security.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Middleware for request ID and security headers
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled: {exc}", extra={"path": request.url.path})
+    return JSONResponse(status_code=500, content={"error": {"type": "internal_error", "message": str(exc)}})
+
+# Set services for v1 routes
+set_services(messages_service, models_service, settings)
+
+# Routes
+app.include_router(health_router)
+app.include_router(v1_router)
+
+@app.on_event("startup")
+async def startup():
+    logger.info("Starting up")
+
+@app.on_event("shutdown")
+async def shutdown():
+    await messages_service.close()
+    await models_service.client.close()
+    logger.info("Shutting down")
+```
+
+- [ ] **Step 3: Add integration test**
+
+```python
+# Add to tests/test_routes.py
+import respx
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage
+
+def test_messages_endpoint():
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=respx.Response(200, json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            })
+        )
+        resp = client.post("/v1/messages", json={
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
+        })
+        assert resp.status_code == 200
+        assert resp.json()["id"] == "test"
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `pytest tests/ -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add app/main.py app/routes/v1.py
+git commit -m "feat: add v1 API routes"
+```
+
+---
+
+## Task 13.5: Streaming Test
+
+- [ ] **Step 1: Write streaming test**
+
+```python
+# Add to tests/test_routes.py
+def test_messages_streaming():
+    with respx.mock:
+        def stream_gen():
+            yield b'data: {"id":"chat-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}\n\n'
+            yield b'data: {"id":"chat-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b'data: [DONE]\n\n'
+
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=respx.StreamResponse(200, stream=stream_gen())
+        )
+        resp = client.post("/v1/messages", json={
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
+            "stream": True
+        })
+        assert resp.status_code == 200
+        assert b"event:" in resp.content
+```
+
+- [ ] **Step 2: Run test**
+
+Run: `pytest tests/test_routes.py::test_messages_streaming -v`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/test_routes.py
+git commit -m "test: add streaming test"
+```
+
+---
+
+## Task 14: Rate Limiting
+
+- [ ] **Step 1: Update app/main.py with rate limiting**
+
+Add to imports:
+```python
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+```
+
+After logger:
+```python
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+```
+
+Update create_message route in app/routes/v1.py:
+```python
+@router.post("/messages")
+@limiter.limit(f"{settings.proxy.rate_limit_per_minute}/minute")
+async def create_message(request: AnthropicRequest, http_request: Request):
+```
+
+- [ ] **Step 2: Test rate limiting**
+
+```python
+# Add to tests/test_routes.py
+def test_rate_limit():
+    import time
+    responses = []
+    for i in range(5):
+        with respx.mock:
+            respx.post("https://api.openai.com/v1/chat/completions").mock(
+                return_value=respx.Response(200, json={
+                    "id": f"test-{i}",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": "gpt-4o",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+                })
+            )
+            resp = client.post("/v1/messages", json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
+            })
+            responses.append(resp.status_code)
+    # Check we got some 200s
+    assert 200 in responses
+```
+
+- [ ] **Step 3: Run tests**
+
+Run: `pytest tests/test_routes.py::test_rate_limit -v`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/main.py app/routes/v1.py tests/test_routes.py
+git commit -m "feat: add rate limiting"
+```
+
+---
+
+## Task 15: Request Size Limit
+
+- [ ] **Step 1: Add size validation to app/main.py**
+
+Update middleware:
+```python
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    # Request size validation
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > settings.proxy.max_request_size_mb * 1024 * 1024:
+            return JSONResponse(status_code=413, content={
+                "error": {"type": "request_too_large", "message": "Request too large"}
+            })
+    response = await call_next(request)
+    # ... rest of middleware
+```
+
+- [ ] **Step 2: Test**
+
+```python
+# Add to tests/test_routes.py
+def test_request_too_large():
+    large = "x" * (11 * 1024 * 1024)
+    resp = client.post("/v1/messages", json={
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": [{"type": "text", "text": large}]}]
+    })
+    assert resp.status_code == 413
+```
+
+- [ ] **Step 3: Run tests**
+
+Run: `pytest tests/test_routes.py::test_request_too_large -v`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/main.py tests/test_routes.py
+git commit -m "feat: add request size limit"
+```
+
+---
+
+## Task 16: Authentication (Optional)
+
+- [ ] **Step 1: Write test**
+
+```python
+# tests/test_auth.py
+import pytest
+from app.main import app
+from fastapi.testclient import TestClient
+
+client = TestClient(app)
+
+def test_auth_disabled():
+    with respx.mock:
+        respx.post("https://api.openai.com/v1/chat/completions").mock(
+            return_value=respx.Response(200, json={
+                "id": "test",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4o",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            })
+        )
+        resp = client.post("/v1/messages", json={
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}]
+        }, headers={"x-api-key": "invalid"})
+        # Should not 401 since auth is disabled by default
+        assert resp.status_code != 401
+```
+
+- [ ] **Step 2: Add auth middleware to app/main.py**
+
+Update middleware:
+```python
+@app.middleware("http")
+async def middleware(request: Request, call_next):
+    # API key validation (optional)
+    if settings.security.require_authentication:
+        api_key = request.headers.get(settings.security.api_key_header)
+        valid_keys = os.getenv("VALID_API_KEYS", "").split(",")
+        if not api_key or api_key not in valid_keys:
+            return JSONResponse(status_code=401, content={
+                "error": {"type": "authentication_error", "message": "Invalid API key"}
+            })
+    # ... rest of middleware
+```
+
+- [ ] **Step 3: Run tests**
+
+Run: `pytest tests/test_auth.py -v`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/main.py tests/test_auth.py
+git commit -m "feat: add optional authentication"
+```
+
+---
+
+## Task 17: Docker Deployment
+
+- [ ] **Step 1: Write Dockerfile**
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install -e ".[dev]" && pip install uvicorn[standard]
+
+COPY app/ app/
+COPY conf/ conf/
+RUN mkdir -p logs
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- [ ] **Step 2: Write docker-compose.yml**
+
+```yaml
+version: '3.8'
+services:
+  proxy:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./conf/prometheus.yml:/etc/prometheus/prometheus.yml
+```
+
+- [ ] **Step 3: Write conf/prometheus.yml**
+
+```yaml
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: 'anthropic2openai'
+    static_configs:
+      - targets: ['proxy:8000']
+```
+
+- [ ] **Step 4: Write .env.example**
+
+```
+OPENAI_API_KEY=your-key-here
+LOG_LEVEL=INFO
+```
+
+- [ ] **Step 5: Test Docker build**
+
+Run: `docker build -t anthropic2openai .`
+Expected: Build succeeds
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add Dockerfile docker-compose.yml conf/prometheus.yml .env.example
+git commit -m "feat: add Docker deployment"
+```
+
+---
+
+## Task 18: Documentation
+
+- [ ] **Step 1: Write README.md**
+
+```markdown
+# Anthropic to OpenAI API Proxy
+
+A production-ready HTTP proxy for translating Anthropic API requests to OpenAI format.
+
+## Features
+
+- Non-streaming and streaming responses
+- Tool calling
+- Retry logic with exponential backoff
+- Prometheus metrics
+- Rate limiting
+- Structured logging
+
+## Quick Start
+
+```bash
+export OPENAI_API_KEY=your-key
+uvicorn app.main:app --reload
+```
+
+## API
+
+- `POST /v1/messages` - Send messages
+- `GET /v1/models` - List models
+- `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics
+
+## Configuration
+
+See `conf/settings.json`. Environment variables override settings.
+
+## Testing
+
+```bash
+pytest tests/
+```
+
+## License
+
+MIT
+```
+
+- [ ] **Step 2: Write README.zh.md** (Chinese version)
+
+```markdown
+# Anthropic to OpenAI API 代理
+
+生产就绪的 HTTP 代理，转换 Anthropic API 请求到 OpenAI 格式。
+
+## 功能
+
+- 流式和非流式响应
+- 工具调用
+- 重试逻辑
+- Prometheus 指标
+- 速率限制
+- 结构化日志
+
+## 快速开始
+
+```bash
+export OPENAI_API_KEY=your-key
+uvicorn app.main:app --reload
+```
+
+## API
+
+- `POST /v1/messages` - 发送消息
+- `GET /v1/models` - 列出模型
+- `GET /health` - 健康检查
+- `GET /metrics` - Prometheus 指标
+
+## 配置
+
+参见 `conf/settings.json`。环境变量覆盖配置。
+
+## 测试
+
+```bash
+pytest tests/
+```
+
+## 许可证
+
+MIT
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add README.md README.zh.md
+git commit -m "docs: add README documentation"
+```
+
+---
+
+## Task 19: Final Tests
+
+- [ ] **Step 1: Run all tests with coverage**
+
+Run: `pytest tests/ --cov=app --cov-report=term-missing`
+Expected: All pass, coverage >= 80%
+
+- [ ] **Step 2: Run linter**
+
+Run: `ruff check app/ tests/`
+Expected: No errors
+
+- [ ] **Step 3: Test manual startup**
+
+Run: `OPENAI_API_KEY=test uvicorn app.main:app --port 8000`
+Expected: Server starts
+
+- [ ] **Step 4: Test health endpoint**
+
+Run: `curl http://localhost:8000/health`
+Expected: `{"status":"healthy","service":"anthropic2openai"}`
+
+- [ ] **Step 5: Final commit**
+
+```bash
+git commit --allow-empty -m "chore: implementation complete"
+```
+
+---
+
+## Summary
+
+- **19 tasks** covering all requirements
+- **TDD approach** with failing tests first
+- **respx** for HTTP mocking (supports streaming)
+- **Authentication** optional via configuration
+- **Security headers** in middleware
+- **Rate limiting** with slowapi
+- **Size limits** for requests
+- **Docker** deployment ready
+
+Estimated time: ~3-4 hours.
