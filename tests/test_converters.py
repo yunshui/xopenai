@@ -1,8 +1,9 @@
 """Tests for request/response converters."""
 import pytest
-from app.schemas.anthropic import AnthropicRequest, AnthropicMessage, AnthropicTool
-from app.schemas.openai import OpenAIRequest
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage, AnthropicTool, AnthropicResponse, AnthropicUsage
+from app.schemas.openai import OpenAIRequest, OpenAIResponse, OpenAIChoice, OpenAIUsage
 from app.converters.request import RequestConverter
+from app.converters.response import ResponseConverter
 
 
 def test_convert_simple_message():
@@ -34,3 +35,36 @@ def test_convert_with_tools():
     assert len(openai.tools) == 1
     assert openai.tools[0].type == "function"
     assert openai.tools[0].function.name == "get_weather"
+
+
+def test_convert_response():
+    openai = OpenAIResponse(
+        id="resp_123",
+        created=1234567890,
+        model="gpt-4o",
+        choices=[OpenAIChoice(
+            index=0,
+            message={"role": "assistant", "content": "Hello!"},
+            finish_reason="stop"
+        )],
+        usage=OpenAIUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    )
+    converter = ResponseConverter({"gpt-4o": "claude-3-5-sonnet-20241022"})
+    anthropic = converter.openai_to_anthropic(openai, "claude-3-5-sonnet-20241022")
+    assert anthropic.id == "resp_123"
+    assert anthropic.model == "claude-3-5-sonnet-20241022"
+    assert anthropic.content[0]["text"] == "Hello!"
+
+
+def test_convert_stream_chunk():
+    converter = ResponseConverter({"gpt-4o": "claude-3-5-sonnet-20241022"})
+    chunk = {
+        "id": "test",
+        "object": "chat.completion.chunk",
+        "created": 1234567890,
+        "model": "gpt-4o",
+        "choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": None}]
+    }
+    events = list(converter.convert_stream_chunk(chunk))
+    assert len(events) > 0
+    assert any(e.event == "content_block_delta" for e in events)
