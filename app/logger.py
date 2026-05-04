@@ -1,4 +1,5 @@
 """Structured logging utility."""
+import json
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -15,26 +16,25 @@ class StructuredFormatter(logging.Formatter):
                  if k not in {'name', 'msg', 'args', 'levelname', 'levelno',
                               'pathname', 'filename', 'module', 'exc_info',
                               'stack_info', 'lineno', 'funcName', 'created',
-                              'msecs', 'message', 'asctime'}}
+                              'msecs', 'message', 'asctime', 'exc_text',
+                              'relativeCreated', 'thread', 'threadName',
+                              'process', 'processName'}}
         if extra:
-            import json
             base += f" | {json.dumps(extra)}"
         return base
 
 
-_loggers: dict[str, logging.Logger] = {}
-
-
 def get_logger(name: str) -> logging.Logger:
-    if name not in _loggers:
-        _loggers[name] = logging.getLogger(name)
-    return _loggers[name]
+    return logging.getLogger(name)
 
 
 def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
+    level_upper = level.upper()
+    if not hasattr(logging, level_upper):
+        raise ValueError(f"Invalid log level: {level}")
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
-    root.setLevel(getattr(logging, level.upper()))
+    root.setLevel(getattr(logging, level_upper))
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(StructuredFormatter())
     root.addHandler(console)
