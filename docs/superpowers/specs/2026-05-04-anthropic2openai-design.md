@@ -235,11 +235,9 @@ anthropic2openai/
 │   └── test_routes.py       # Route tests
 ├── logs/                    # Log directory
 ├── docs/                    # Documentation
-│   ├── design.md            # Design document (this file)
-│   ├── development.md       # Development documentation
-│   ├── testing.md           # Testing documentation
-│   ├── progress.md          # Progress tracking
-│   └── lessons.md           # Lessons learned
+│   └── superpowers/         # Superpowers documentation
+│       └── specs/           # Specification documents
+│           └── 2026-05-04-anthropic2openai-design.md  # Design document (this file)
 ├── .gitignore
 ├── pyproject.toml           # Project configuration
 ├── Dockerfile
@@ -287,11 +285,24 @@ By default, the proxy does not require its own authentication. However, it can b
 
 1. **Validate Anthropic API keys** (optional, requires `require_authentication: true`)
    - Validates the `x-api-key` header
-   - Rejects requests with invalid keys
+   - Valid keys are configured via `VALID_API_KEYS` environment variable (comma-separated)
+   - Rejects requests with invalid or missing keys
+   - Returns 401 Unauthorized with message: "Invalid API key"
 
 2. **Accept Anthropic API keys without validation** (default)
    - Forwards the `x-api-key` header value for logging purposes
    - Does not validate the key
+   - Allows any request to proceed
+
+**API Key Validation Response Format (when validation fails):**
+```json
+{
+  "error": {
+    "type": "authentication_error",
+    "message": "Invalid API key"
+  }
+}
+```
 
 ### OpenAI Authentication
 
@@ -353,10 +364,17 @@ To prevent memory issues:
 }
 ```
 
+**Request ID Generation:**
+- Each request is assigned a unique ID (UUID v4 format)
+- Request ID is logged with each log entry
+- Returned in error responses and response headers (`X-Request-ID`)
+
+**Error Behaviors:**
 - **Conversion failure**: 422 error, logged
 - **API request failure**: Return OpenAI's original error (converted format)
 - **Timeout/retry exhausted**: 504 error
-- **Client disconnect**: Log, continue processing
+- **Client disconnect (streaming)**: Cancel OpenAI request, log the disconnect
+- **Client disconnect (non-streaming)**: Log, continue processing in background
 
 ## Monitoring
 
