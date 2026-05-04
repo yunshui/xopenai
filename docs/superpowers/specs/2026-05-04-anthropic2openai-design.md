@@ -1,7 +1,7 @@
 # Anthropic to OpenAI API Proxy - Design Document
 
 **Date:** 2026-05-04
-**Status:** DRAFT - Under Review
+**Status:** APPROVED
 **Version:** 1.1
 
 ## Overview
