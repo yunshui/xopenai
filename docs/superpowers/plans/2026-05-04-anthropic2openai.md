@@ -1191,9 +1191,9 @@ async def metrics():
 """FastAPI application."""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.config import Settings, setup_logging
+from app.config import Settings
+from app.logger import setup_logging, get_logger
 from app.routes.health import router as health_router
-from app.logger import get_logger
 
 settings = Settings.load_from_json()
 setup_logging(settings.logging.log_dir, settings.logging.level)
@@ -1573,6 +1573,7 @@ git commit -m "feat: add request size limit"
 ```python
 # tests/test_auth.py
 import pytest
+import respx
 from app.main import app
 from fastapi.testclient import TestClient
 
