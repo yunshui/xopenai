@@ -22,6 +22,7 @@
   },
   "security": {
     "allowed_origins": ["*"],
-    "require_authentication": false
+    "require_authentication": false,
+    "api_key_header": "x-api-key"
   }
 }
