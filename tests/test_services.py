@@ -2,6 +2,7 @@
 import pytest
 import httpx
 from app.services.messages import AnthropicMessagesService
+from app.services.models import AnthropicModelsService
 from app.schemas.anthropic import AnthropicRequest, AnthropicMessage
 from app.config import Settings
 
@@ -60,4 +61,22 @@ async def test_handle_messages_stream():
         async for event in service.handle_messages_stream(request):
             events.append(event)
         assert len(events) > 0
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_list_models():
+    settings = Settings()
+    service = AnthropicModelsService(settings)
+    import respx
+    with respx.mock:
+        respx.get("https://api.openai.com/v1/models").mock(
+            return_value=httpx.Response(200, json={
+                "object": "list",
+                "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
+            })
+        )
+        response = await service.handle_models()
+        assert response.object == "list"
+        assert len(response.data) == 2
     await service.close()
