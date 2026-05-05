@@ -9,7 +9,7 @@
 - 重试逻辑
 - Prometheus 指标
 - 速率限制
-- 结构化日志
+- 结构化日志（每日轮转）
 - 请求大小限制
 - 可选认证
 
@@ -30,6 +30,14 @@ uvicorn app.main:app --reload
 ## 配置
 
 参见 `conf/settings.json`。环境变量覆盖配置。
+
+## 日志
+
+日志存储在 `logs/` 目录中，采用结构化 JSON 格式。日志文件每天午夜轮转，保留 7 天。日志格式：
+
+```
+[YYYY-MM-DD HH:MM:SS] [LEVEL] [module:line] message | {"extra": "fields"}
+```
 
 ## 测试
 

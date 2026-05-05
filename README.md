@@ -9,7 +9,7 @@ A production-ready HTTP proxy for translating Anthropic API requests to OpenAI f
 - Retry logic with exponential backoff
 - Prometheus metrics
 - Rate limiting
-- Structured logging
+- Structured logging with daily rotation
 - Request size limits
 - Optional authentication
 
@@ -30,6 +30,14 @@ uvicorn app.main:app --reload
 ## Configuration
 
 See `conf/settings.json`. Environment variables override settings.
+
+## Logging
+
+Logs are stored in the `logs/` directory with structured JSON format. Log files rotate daily at midnight with a 7-day retention period. Log format:
+
+```
+[YYYY-MM-DD HH:MM:SS] [LEVEL] [module:line] message | {"extra": "fields"}
+```
 
 ## Testing
 
