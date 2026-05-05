@@ -81,10 +81,11 @@
 
 ### ✅ Task 3: Structured Logging
 - **状态**: 完成
-- **提交**: `25e70b9`
+- **提交**: `25e70b9`, `FIX 2026-05-05`
 - **文件创建**:
   - `app/logger.py` - 结构化日志模块
   - `tests/test_logger.py` - 日志测试
+- **修复**: 使用 `TimedRotatingFileHandler` 实现每日午夜轮转，日志文件命名格式 `anthropic2openai.log-2026-05-05.log`
 
 ### ✅ Task 4: Prometheus Metrics
 - **状态**: 完成
@@ -219,6 +220,7 @@
 - 使用 subagent-driven-development 技能执行
 - Task 1 执行顺利，审查流程有效
 - Task 2 开始后被中断
+- Task 3 修复：将 RotatingFileHandler 改为 TimedRotatingFileHandler 以实现每日轮转，而非基于文件大小轮转
 
 ## 技术决策
 
@@ -243,7 +245,7 @@
 - **测试数量**: 36
 - **测试通过率**: 100%
 - **代码覆盖率**: 94%
-- **代码行数**: 498
+- **代码行数**: 499
 
 ## 最终质量指标
 
@@ -257,6 +259,7 @@
 ## Git 提交历史
 
 ```
+FIX 2026-05-05 fix: implement daily log rotation with TimedRotatingFileHandler
 326a60d chore: implementation complete
 c5c76fb style: fix linter issues
 f886ca1 docs: add README documentation in English and Chinese
