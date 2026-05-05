@@ -1,5 +1,5 @@
 """Tests for Prometheus metrics."""
-from app.metrics import Metrics, get_metrics
+from app.metrics import get_metrics
 
 
 def test_metrics_singleton():

@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.config import Settings
 from app.schemas.anthropic import AnthropicRequest, AnthropicModelsResponse

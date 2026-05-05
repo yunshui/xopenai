@@ -1,5 +1,4 @@
 """Tests for authentication."""
-import pytest
 import httpx
 from app.main import app
 from fastapi.testclient import TestClient

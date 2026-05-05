@@ -2,7 +2,6 @@
 from fastapi import APIRouter
 from prometheus_client import generate_latest
 
-from app.metrics import get_metrics
 
 router = APIRouter()
 

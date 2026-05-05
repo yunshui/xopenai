@@ -1,6 +1,6 @@
 """Tests for request/response converters."""
 import pytest
-from app.schemas.anthropic import AnthropicRequest, AnthropicMessage, AnthropicTool, AnthropicResponse, AnthropicUsage
+from app.schemas.anthropic import AnthropicRequest, AnthropicMessage
 from app.schemas.openai import OpenAIRequest, OpenAIResponse, OpenAIChoice, OpenAIUsage
 from app.converters.request import RequestConverter
 from app.converters.response import ResponseConverter
@@ -107,7 +107,6 @@ async def test_retry_manager_success():
 async def test_retry_manager_with_retry():
     from app.converters.retry import RetryManager
     import httpx
-    import respx
 
     manager = RetryManager(max_retries=2, delay=0.01)
 

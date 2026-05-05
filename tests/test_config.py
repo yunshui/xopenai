@@ -1,6 +1,4 @@
 """Configuration tests."""
-import os
-import pytest
 from app.config import Settings
 
 

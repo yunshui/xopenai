@@ -1,5 +1,4 @@
 """Convert OpenAI responses to Anthropic format."""
-import json
 from typing import Any, Generator
 
 from app.schemas.openai import OpenAIResponse
