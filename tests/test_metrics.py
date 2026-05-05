@@ -12,5 +12,7 @@ def test_metrics_singleton():
 def test_record_request():
     """Test that recording a request increments the counter."""
     metrics = get_metrics()
+    before = metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="200")._value.get()
     metrics.record_request("POST", "/v1/messages", 200)
-    assert metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="200")._value.get() == 1
+    after = metrics.requests_total.labels(method="POST", endpoint="/v1/messages", status="200")._value.get()
+    assert after >= before + 1

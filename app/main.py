@@ -12,6 +12,7 @@ from app.routes.v1 import router as v1_router, set_services, set_limiter
 from app.services.messages import AnthropicMessagesService
 from app.services.models import AnthropicModelsService
 import uuid
+import os
 
 settings = Settings.load_from_json()
 setup_logging(settings.logging_log_dir, settings.logging_level)
@@ -51,6 +52,14 @@ async def middleware(request: Request, call_next):
         if content_length and int(content_length) > settings.proxy_max_request_size_mb * 1024 * 1024:
             return JSONResponse(status_code=413, content={
                 "error": {"type": "request_too_large", "message": "Request too large"}
+            })
+    # API key validation (optional)
+    if settings.security_require_authentication:
+        api_key = request.headers.get(settings.security_api_key_header)
+        valid_keys = os.getenv("VALID_API_KEYS", "").split(",")
+        if not api_key or api_key not in valid_keys:
+            return JSONResponse(status_code=401, content={
+                "error": {"type": "authentication_error", "message": "Invalid API key"}
             })
     response = await call_next(request)
     response.headers["X-Request-ID"] = str(uuid.uuid4())
