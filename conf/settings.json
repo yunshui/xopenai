@@ -17,7 +17,7 @@
     "log_dir": "logs"
   },
   "model_mapping": {
-    "claude-3-5-sonnet-20241022": "qwen-plus",
+    "claude-3-5-sonnet-20241022": "qwen3.6-plus",
     "claude-3-5-haiku-20241022": "qwen-turbo",
     "claude-3-opus-20240229": "qwen-max"
   },

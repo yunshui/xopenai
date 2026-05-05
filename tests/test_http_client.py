@@ -38,6 +38,6 @@ async def test_send_request_with_retry():
 
     with respx.mock:
         respx.post("https://coding.dashscope.aliyuncs.com/v1/chat/completions").mock(side_effect=mock_response)
-        response = await client.send_request("POST", "/chat/completions", json={"model": "qwen-plus"})
+        response = await client.send_request("POST", "/chat/completions", json={"model": "qwen3.6-plus"})
         assert response.status_code == 200
         assert attempt_count >= 2

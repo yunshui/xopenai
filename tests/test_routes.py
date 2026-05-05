@@ -23,7 +23,7 @@ def test_messages_endpoint():
                 "id": "test",
                 "object": "chat.completion",
                 "created": 1234567890,
-                "model": "qwen-plus",
+                "model": "qwen3.6-plus",
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
             })
