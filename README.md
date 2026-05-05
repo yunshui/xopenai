@@ -16,7 +16,13 @@ A production-ready HTTP proxy for translating Anthropic API requests to OpenAI f
 ## Quick Start
 
 ```bash
-export OPENAI_API_KEY=your-key
+# Copy example configuration
+cp conf/settings.json.example conf/settings.json
+
+# Edit settings.json to add your API key
+# Or use environment variable
+export OPENAI__API_KEY=your-key
+
 uvicorn app.main:app --reload
 ```
 
@@ -29,7 +35,26 @@ uvicorn app.main:app --reload
 
 ## Configuration
 
-See `conf/settings.json`. Environment variables override settings.
+The proxy uses `conf/settings.json` for configuration. For your first setup:
+
+```bash
+cp conf/settings.json.example conf/settings.json
+```
+
+Then edit `conf/settings.json` to configure:
+
+- **OpenAI API**: Default endpoint is Qwen OpenAI-compatible API (`https://coding.dashscope.aliyuncs.com/v1`)
+- **Model Mapping**: Maps Anthropic model names to backend models (default: `claude-3-5-sonnet-20241022` → `qwen3.6-plus`)
+- **Security**: Optional API key authentication
+- **Proxy Settings**: Retry, timeout, rate limiting
+
+Environment variables override settings:
+```bash
+OPENAI__API_KEY=sk-dashscope-your-key
+OPENAI__API_ENDPOINT=https://coding.dashscope.aliyuncs.com/v1
+```
+
+See `.env.example` for all available environment variables.
 
 ## Logging
 

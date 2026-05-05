@@ -16,7 +16,13 @@
 ## 快速开始
 
 ```bash
-export OPENAI_API_KEY=your-key
+# 复制示例配置文件
+cp conf/settings.json.example conf/settings.json
+
+# 编辑 settings.json 添加 API 密钥
+# 或使用环境变量
+export OPENAI__API_KEY=your-key
+
 uvicorn app.main:app --reload
 ```
 
@@ -29,7 +35,26 @@ uvicorn app.main:app --reload
 
 ## 配置
 
-参见 `conf/settings.json`。环境变量覆盖配置。
+代理使用 `conf/settings.json` 进行配置。首次使用：
+
+```bash
+cp conf/settings.json.example conf/settings.json
+```
+
+然后编辑 `conf/settings.json` 配置：
+
+- **OpenAI API**：默认使用 Qwen OpenAI 兼容 API (`https://coding.dashscope.aliyuncs.com/v1`)
+- **模型映射**：将 Anthropic 模型名称映射到后端模型（默认：`claude-3-5-sonnet-20241022` → `qwen3.6-plus`）
+- **安全配置**：可选 API 密钥认证
+- **代理设置**：重试、超时、速率限制
+
+环境变量覆盖配置：
+```bash
+OPENAI__API_KEY=sk-dashscope-your-key
+OPENAI__API_ENDPOINT=https://coding.dashscope.aliyuncs.com/v1
+```
+
+查看 `.env.example` 了解所有可用环境变量。
 
 ## 日志
 
