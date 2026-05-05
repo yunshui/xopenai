@@ -17,6 +17,9 @@ venv/
 .env
 .env.local
 
+# Configuration
+conf/settings.json
+
 # Testing
 .pytest_cache/
 .coverage

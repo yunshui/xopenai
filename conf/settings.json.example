@@ -1,7 +1,7 @@
 {
   "openai": {
     "api_endpoint": "https://coding.dashscope.aliyuncs.com/v1",
-    "api_key": ""
+    "api_key": "your-api-key-here"
   },
   "proxy": {
     "max_retries": 3,
