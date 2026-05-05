@@ -25,7 +25,7 @@ def test_security_config_defaults():
 
 def test_load_from_json_existing_file():
     settings = Settings.load_from_json()
-    assert settings.openai.api_endpoint == "https://api.openai.com/v1"
+    assert settings.openai.api_endpoint == "https://coding.dashscope.aliyuncs.com/v1"
     assert settings.proxy.max_retries == 3
     assert settings.security.api_key_header == "x-api-key"
 

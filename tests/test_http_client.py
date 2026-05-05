@@ -37,7 +37,7 @@ async def test_send_request_with_retry():
         return httpx.Response(200, json={"id": "test", "choices": []})
 
     with respx.mock:
-        respx.post("https://api.openai.com/v1/chat/completions").mock(side_effect=mock_response)
-        response = await client.send_request("POST", "/chat/completions", json={"model": "gpt-4o"})
+        respx.post("https://coding.dashscope.aliyuncs.com/v1/chat/completions").mock(side_effect=mock_response)
+        response = await client.send_request("POST", "/chat/completions", json={"model": "qwen-plus"})
         assert response.status_code == 200
         assert attempt_count >= 2

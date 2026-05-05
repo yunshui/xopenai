@@ -1,6 +1,6 @@
 {
   "openai": {
-    "api_endpoint": "https://api.openai.com/v1",
+    "api_endpoint": "https://coding.dashscope.aliyuncs.com/v1",
     "api_key": ""
   },
   "proxy": {
@@ -17,8 +17,9 @@
     "log_dir": "logs"
   },
   "model_mapping": {
-    "claude-3-5-sonnet-20241022": "gpt-4o",
-    "claude-3-5-haiku-20241022": "gpt-4o-mini"
+    "claude-3-5-sonnet-20241022": "qwen-plus",
+    "claude-3-5-haiku-20241022": "qwen-turbo",
+    "claude-3-opus-20240229": "qwen-max"
   },
   "security": {
     "allowed_origins": ["*"],

@@ -18,12 +18,12 @@ def test_metrics():
 def test_messages_endpoint():
     import respx
     with respx.mock:
-        respx.post("https://api.openai.com/v1/chat/completions").mock(
+        respx.post("https://coding.dashscope.aliyuncs.com/v1/chat/completions").mock(
             return_value=httpx.Response(200, json={
                 "id": "test",
                 "object": "chat.completion",
                 "created": 1234567890,
-                "model": "gpt-4o",
+                "model": "qwen-plus",
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
             })
@@ -40,10 +40,10 @@ def test_messages_endpoint():
 def test_models_endpoint():
     import respx
     with respx.mock:
-        respx.get("https://api.openai.com/v1/models").mock(
+        respx.get("https://coding.dashscope.aliyuncs.com/v1/models").mock(
             return_value=httpx.Response(200, json={
                 "object": "list",
-                "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
+                "data": [{"id": "qwen-plus"}, {"id": "qwen-turbo"}]
             })
         )
         resp = client.get("/v1/models")
