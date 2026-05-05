@@ -2,7 +2,7 @@
 import json
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from datetime import datetime
 
@@ -38,9 +38,12 @@ def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(StructuredFormatter())
     root.addHandler(console)
-    file_handler = RotatingFileHandler(
+    file_handler = TimedRotatingFileHandler(
         Path(log_dir) / "anthropic2openai.log",
-        maxBytes=10*1024*1024, backupCount=7
+        when="midnight",
+        interval=1,
+        backupCount=7
     )
     file_handler.setFormatter(StructuredFormatter())
+    file_handler.suffix = "%Y-%m-%d.log"
     root.addHandler(file_handler)
