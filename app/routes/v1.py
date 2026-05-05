@@ -1,6 +1,8 @@
 """v1 API routes."""
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.config import Settings
 from app.schemas.anthropic import AnthropicRequest, AnthropicModelsResponse
@@ -11,10 +13,18 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1", tags=["v1"])
 
+# Limiter will be set from main.py
+_limiter: Limiter | None = None
+
 # Services will be set from main.py
 _messages_service: AnthropicMessagesService | None = None
 _models_service: AnthropicModelsService | None = None
 _settings: Settings | None = None
+
+
+def set_limiter(limiter: Limiter) -> None:
+    global _limiter
+    _limiter = limiter
 
 
 def set_services(messages: AnthropicMessagesService, models: AnthropicModelsService, settings: Settings) -> None:
