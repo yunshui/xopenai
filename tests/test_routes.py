@@ -71,3 +71,13 @@ def test_messages_streaming():
         })
         assert resp.status_code == 200
         assert b"event:" in resp.content
+
+
+def test_request_too_large():
+    large = "x" * (11 * 1024 * 1024)
+    resp = client.post("/v1/messages", json={
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 100,
+        "messages": [{"role": "user", "content": [{"type": "text", "text": large}]}]
+    })
+    assert resp.status_code == 413

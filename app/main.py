@@ -45,6 +45,13 @@ app.add_middleware(
 # Middleware for request ID and security headers
 @app.middleware("http")
 async def middleware(request: Request, call_next):
+    # Request size validation
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > settings.proxy_max_request_size_mb * 1024 * 1024:
+            return JSONResponse(status_code=413, content={
+                "error": {"type": "request_too_large", "message": "Request too large"}
+            })
     response = await call_next(request)
     response.headers["X-Request-ID"] = str(uuid.uuid4())
     response.headers["X-Content-Type-Options"] = "nosniff"
