@@ -36,12 +36,13 @@ def set_services(messages: AnthropicMessagesService, models: AnthropicModelsServ
 @router.post("/messages")
 async def create_message(request: AnthropicRequest, http_request: Request):
     service = _messages_service
+    request_id = getattr(http_request.state, 'request_id', None)
     if request.stream:
         return StreamingResponse(
-            service.handle_messages_stream(request),
+            service.handle_messages_stream(request, request_id=request_id),
             media_type="text/event-stream",
         )
-    return await service.handle_messages(request)
+    return await service.handle_messages(request, request_id=request_id)
 
 
 @router.get("/models", response_model=AnthropicModelsResponse)

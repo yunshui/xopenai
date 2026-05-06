@@ -46,6 +46,10 @@ app.add_middleware(
 # Middleware for request ID and security headers
 @app.middleware("http")
 async def middleware(request: Request, call_next):
+    # Generate request ID
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+
     # Get client IP
     client_ip = request.client.host if request.client else "-"
 
@@ -53,7 +57,7 @@ async def middleware(request: Request, call_next):
     if request.method == "POST":
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > settings.proxy_max_request_size_mb * 1024 * 1024:
-            logger.warning(f"Request too large", extra={"client_ip": client_ip, "path": request.url.path})
+            logger.warning(f"Request too large", extra={"client_ip": client_ip, "request_id": request_id, "path": request.url.path})
             return JSONResponse(status_code=413, content={
                 "error": {"type": "request_too_large", "message": "Request too large"}
             })
@@ -62,22 +66,22 @@ async def middleware(request: Request, call_next):
         api_key = request.headers.get(settings.security_api_key_header)
         valid_keys = os.getenv("VALID_API_KEYS", "").split(",")
         if not api_key or api_key not in valid_keys:
-            logger.warning(f"Authentication failed", extra={"client_ip": client_ip, "path": request.url.path})
+            logger.warning(f"Authentication failed", extra={"client_ip": client_ip, "request_id": request_id, "path": request.url.path})
             return JSONResponse(status_code=401, content={
                 "error": {"type": "authentication_error", "message": "Invalid API key"}
             })
 
     # Log incoming request
-    logger.info(f"{request.method} {request.url.path}", extra={"client_ip": client_ip})
+    logger.info(f"{request.method} {request.url.path}", extra={"client_ip": client_ip, "request_id": request_id})
 
     response = await call_next(request)
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
+    response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
 
     # Log response status
-    logger.info(f"{request.method} {request.url.path} - {response.status_code}", extra={"client_ip": client_ip})
+    logger.info(f"{request.method} {request.url.path} - {response.status_code}", extra={"client_ip": client_ip, "request_id": request_id})
 
     return response
 
@@ -85,7 +89,8 @@ async def middleware(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     client_ip = request.client.host if request.client else "-"
-    logger.error(f"Unhandled: {exc}", extra={"client_ip": client_ip, "path": request.url.path})
+    request_id = getattr(request.state, 'request_id', '-')
+    logger.error(f"Unhandled: {exc}", extra={"client_ip": client_ip, "request_id": request_id, "path": request.url.path})
     return JSONResponse(status_code=500, content={"error": {"type": "internal_error", "message": str(exc)}})
 
 # Routes
