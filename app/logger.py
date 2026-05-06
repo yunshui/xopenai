@@ -11,14 +11,16 @@ class StructuredFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         timestamp = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
         module_line = f"{record.name}:{record.lineno}"
-        base = f"[{timestamp}] [{record.levelname}] [{module_line}] {record.getMessage()}"
+        # Extract client_ip from extra fields if present
+        client_ip = record.__dict__.get('client_ip', '-')
+        base = f"[{timestamp}] [{record.levelname}] [{module_line}] [{client_ip}] {record.getMessage()}"
         extra = {k: v for k, v in record.__dict__.items()
                  if k not in {'name', 'msg', 'args', 'levelname', 'levelno',
                               'pathname', 'filename', 'module', 'exc_info',
                               'stack_info', 'lineno', 'funcName', 'created',
                               'msecs', 'message', 'asctime', 'exc_text',
                               'relativeCreated', 'thread', 'threadName',
-                              'process', 'processName'}}
+                              'process', 'processName', 'client_ip'}}
         if extra:
             base += f" | {json.dumps(extra)}"
         return base

@@ -46,10 +46,14 @@ app.add_middleware(
 # Middleware for request ID and security headers
 @app.middleware("http")
 async def middleware(request: Request, call_next):
+    # Get client IP
+    client_ip = request.client.host if request.client else "-"
+
     # Request size validation
     if request.method == "POST":
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > settings.proxy_max_request_size_mb * 1024 * 1024:
+            logger.warning(f"Request too large", extra={"client_ip": client_ip, "path": request.url.path})
             return JSONResponse(status_code=413, content={
                 "error": {"type": "request_too_large", "message": "Request too large"}
             })
@@ -58,20 +62,30 @@ async def middleware(request: Request, call_next):
         api_key = request.headers.get(settings.security_api_key_header)
         valid_keys = os.getenv("VALID_API_KEYS", "").split(",")
         if not api_key or api_key not in valid_keys:
+            logger.warning(f"Authentication failed", extra={"client_ip": client_ip, "path": request.url.path})
             return JSONResponse(status_code=401, content={
                 "error": {"type": "authentication_error", "message": "Invalid API key"}
             })
+
+    # Log incoming request
+    logger.info(f"{request.method} {request.url.path}", extra={"client_ip": client_ip})
+
     response = await call_next(request)
     response.headers["X-Request-ID"] = str(uuid.uuid4())
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Log response status
+    logger.info(f"{request.method} {request.url.path} - {response.status_code}", extra={"client_ip": client_ip})
+
     return response
 
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled: {exc}", extra={"path": request.url.path})
+    client_ip = request.client.host if request.client else "-"
+    logger.error(f"Unhandled: {exc}", extra={"client_ip": client_ip, "path": request.url.path})
     return JSONResponse(status_code=500, content={"error": {"type": "internal_error", "message": str(exc)}})
 
 # Routes
