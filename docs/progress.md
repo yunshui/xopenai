@@ -1,7 +1,7 @@
 # 开发进度记录
 
 ## 项目信息
-- **项目名称**: Anthropic to OpenAI API Proxy
+- **项目名称**: xopenai
 - **开始日期**: 2026-05-04
 - **计划文件**: `docs/superpowers/plans/2026-05-04-anthropic2openai.md`
 
@@ -85,7 +85,7 @@
 - **文件创建**:
   - `app/logger.py` - 结构化日志模块
   - `tests/test_logger.py` - 日志测试
-- **修复**: 使用 `TimedRotatingFileHandler` 实现每日午夜轮转，日志文件命名格式 `anthropic2openai.log-2026-05-05.log`
+- **修复**: 使用 `TimedRotatingFileHandler` 实现每日午夜轮转，日志文件命名格式 `xopenai-2026-05-05.log`
 
 ### ✅ Task 4: Prometheus Metrics
 - **状态**: 完成
