@@ -39,7 +39,7 @@ class AnthropicMessagesService:
 
             # Send to OpenAI service
             httpx_response = await self.client.send_request(
-                "POST", "/chat/completions", json=openai_request.model_dump()
+                "POST", "/chat/completions", json=openai_request.model_dump(exclude_none=True)
             )
             from app.schemas.openai import OpenAIResponse
             openai_response = OpenAIResponse(**httpx_response.json())
@@ -73,7 +73,7 @@ class AnthropicMessagesService:
 
             # Send to OpenAI service
             httpx_response = await self.client.send_request(
-                "POST", "/chat/completions", json=openai_request.model_dump(), stream=True
+                "POST", "/chat/completions", json=openai_request.model_dump(exclude_none=True), stream=True
             )
 
             # Log stream start

@@ -176,3 +176,6 @@ This project maintains several documents that provide different perspectives on 
 - **Lines of Code**: 499
 - **Start Date**: 2026-05-04
 - **Completion Date**: 2026-05-04
+
+## Global Rules
+- **遇到问题时**：先检查问题，列出原因，然后给出解决方案，获得用户同意后再执行修改。

@@ -16,7 +16,8 @@ class RequestConverter:
         openai_model = self.model_mapping.get(request.model, request.model)
         messages: list[OpenAIMessage] = []
         if request.system:
-            messages.append(OpenAIMessage(role="system", content=request.system))
+            system_text = self._extract_system_text(request.system)
+            messages.append(OpenAIMessage(role="system", content=system_text))
         for msg in request.messages:
             messages.extend(self._convert_message(msg))
         tools = [self._convert_tool(t) for t in request.tools] if request.tools else None
@@ -29,6 +30,11 @@ class RequestConverter:
             temperature=request.temperature,
             top_p=request.top_p,
         )
+
+    def _extract_system_text(self, system) -> str:
+        if isinstance(system, str):
+            return system
+        return "\n".join(block.text for block in system)
 
     def _convert_message(self, msg: AnthropicMessage) -> list[OpenAIMessage]:
         if msg.role == "user":

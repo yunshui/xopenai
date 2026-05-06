@@ -24,6 +24,15 @@ class ResponseConverter:
         content: list[dict[str, Any]] = []
         if isinstance(message.get("content"), str):
             content.append({"type": "text", "text": message["content"]})
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            for tc in tool_calls:
+                content.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "input": __import__("json").loads(tc["function"]["arguments"]),
+                })
         usage = AnthropicUsage(
             input_tokens=response.usage.prompt_tokens,
             output_tokens=response.usage.completion_tokens,
@@ -51,6 +60,19 @@ class ResponseConverter:
                     "delta": {"type": "text_delta", "text": delta["content"]},
                 },
             )
+        if delta.get("tool_calls"):
+            for tc in delta["tool_calls"]:
+                yield AnthropicStreamEvent(
+                    event="content_block_delta",
+                    data={
+                        "type": "content_block_delta",
+                        "index": tc.get("index", 0),
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": tc.get("function", {}).get("arguments", ""),
+                        },
+                    },
+                )
         if choice.get("finish_reason"):
             yield AnthropicStreamEvent(
                 event="message_delta",
