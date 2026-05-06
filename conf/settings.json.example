@@ -4,8 +4,8 @@
     "api_key": "your-api-key-here"
   },
   "proxy": {
-    "max_retries": 3,
-    "timeout": 30,
+    "max_retries": 5,
+    "timeout": 300,
     "retry_delay": 1,
     "retry_backoff_multiplier": 2,
     "max_concurrent_requests": 50,

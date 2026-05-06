@@ -38,13 +38,43 @@ class RequestConverter:
 
     def _convert_message(self, msg: AnthropicMessage) -> list[OpenAIMessage]:
         if msg.role == "user":
-            content = "".join(b.get("text", "") for b in msg.content if b.get("type") == "text")
-            return [OpenAIMessage(role="user", content=content)]
-        elif msg.role == "assistant":
             result: list[OpenAIMessage] = []
             for block in msg.content:
+                if block.get("type") == "tool_result":
+                    tool_use_id = block.get("tool_use_id", "")
+                    tool_content = block.get("content", "")
+                    if isinstance(tool_content, list):
+                        tool_content = "".join(
+                            b.get("text", "") for b in tool_content if b.get("type") == "text"
+                        )
+                    result.append(OpenAIMessage(role="tool", content=tool_content, tool_call_id=tool_use_id))
+                elif block.get("type") == "text":
+                    result.append(OpenAIMessage(role="user", content=block.get("text", "")))
+            return result if result else [OpenAIMessage(role="user", content="")]
+        elif msg.role == "assistant":
+            result: list[OpenAIMessage] = []
+            text_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            for block in msg.content:
                 if block.get("type") == "text":
-                    result.append(OpenAIMessage(role="assistant", content=block.get("text", "")))
+                    text_parts.append(block.get("text", ""))
+                elif block.get("type") == "tool_use":
+                    tool_calls.append({
+                        "id": block.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": block.get("name", ""),
+                            "arguments": __import__("json").dumps(block.get("input", {})),
+                        },
+                    })
+            message_dict: dict[str, Any] = {"role": "assistant"}
+            if text_parts:
+                message_dict["content"] = "\n".join(text_parts)
+            elif tool_calls:
+                message_dict["content"] = ""
+            if tool_calls:
+                message_dict["tool_calls"] = tool_calls
+            result.append(OpenAIMessage(**message_dict))
             return result
         return []
 

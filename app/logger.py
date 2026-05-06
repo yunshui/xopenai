@@ -41,16 +41,15 @@ def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(StructuredFormatter())
     root.addHandler(console)
-    # Use today's date as log file name
-    today = datetime.now().strftime("%Y-%m-%d")
-    log_file = Path(log_dir) / f"xopenai-{today}.log"
+    # Use hour-based rotation with format xopenai-YYYY-MM-DD-HH.log
+    now = datetime.now()
+    log_file = Path(log_dir) / f"xopenai-{now.strftime('%Y-%m-%d')}-{now.strftime('%H')}.log"
     file_handler = TimedRotatingFileHandler(
         log_file,
-        when="midnight",
+        when="H",
         interval=1,
-        backupCount=7
+        backupCount=168
     )
     file_handler.setFormatter(StructuredFormatter())
-    file_handler.suffix = "%Y-%m-%d.log"
-    file_handler.namer = lambda name: name.replace(f"xopenai-{today}.log", f"xopenai-{name.split('.')[-2]}.log") if "." in name else name
+    file_handler.namer = lambda name: name
     root.addHandler(file_handler)
