@@ -12,16 +12,16 @@ class Metrics:
     def __init__(self) -> None:
         """Initialize Prometheus metrics."""
         self.requests_total = Counter(
-            "anthropic2openai_requests_total", "Total requests", ["method", "endpoint", "status"]
+            "xopenai_requests_total", "Total requests", ["method", "endpoint", "status"]
         )
         self.request_duration = Histogram(
-            "anthropic2openai_request_duration_seconds", "Request duration", ["method", "endpoint"]
+            "xopenai_request_duration_seconds", "Request duration", ["method", "endpoint"]
         )
         self.conversion_errors = Counter(
-            "anthropic2openai_conversion_errors_total", "Conversion errors", ["converter", "error_type"]
+            "xopenai_conversion_errors_total", "Conversion errors", ["converter", "error_type"]
         )
-        self.retries_total = Counter("anthropic2openai_retries_total", "Retries", ["endpoint"])
-        self.active_connections = Gauge("anthropic2openai_active_connections", "Active connections")
+        self.retries_total = Counter("xopenai_retries_total", "Retries", ["endpoint"])
+        self.active_connections = Gauge("xopenai_active_connections", "Active connections")
 
     def record_request(self, method: str, endpoint: str, status: int) -> None:
         """Record a request with method, endpoint, and status code."""

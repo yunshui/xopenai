@@ -1,4 +1,4 @@
-# Anthropic to OpenAI API 代理
+# xopenai
 
 生产就绪的 HTTP 代理，转换 Anthropic API 请求到 OpenAI 格式。
 

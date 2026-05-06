@@ -1,6 +1,6 @@
 global:
   scrape_interval: 15s
 scrape_configs:
-  - job_name: 'anthropic2openai'
+  - job_name: 'xopenai'
     static_configs:
       - targets: ['proxy:8000']

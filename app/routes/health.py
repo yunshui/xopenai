@@ -7,7 +7,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "anthropic2openai"}
+    return {"status": "healthy", "service": "xopenai"}
 
 @router.get("/metrics")
 async def metrics():

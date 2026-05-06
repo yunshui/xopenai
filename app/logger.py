@@ -38,12 +38,16 @@ def setup_logging(log_dir: str = "logs", level: str = "INFO") -> None:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(StructuredFormatter())
     root.addHandler(console)
+    # Use today's date as log file name
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_file = Path(log_dir) / f"xopenai-{today}.log"
     file_handler = TimedRotatingFileHandler(
-        Path(log_dir) / "anthropic2openai.log",
+        log_file,
         when="midnight",
         interval=1,
         backupCount=7
     )
     file_handler.setFormatter(StructuredFormatter())
     file_handler.suffix = "%Y-%m-%d.log"
+    file_handler.namer = lambda name: name.replace(f"xopenai-{today}.log", f"xopenai-{name.split('.')[-2]}.log") if "." in name else name
     root.addHandler(file_handler)

@@ -1,4 +1,4 @@
-# Anthropic to OpenAI API Proxy
+# xopenai
 
 A production-ready HTTP proxy for translating Anthropic API requests to OpenAI format.
 
