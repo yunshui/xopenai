@@ -3,7 +3,7 @@
 ## 项目信息
 - **项目名称**: xopenai
 - **开始日期**: 2026-05-04
-- **计划文件**: `docs/superpowers/plans/2026-05-04-anthropic2openai.md`
+- **计划文件**: `docs/superpowers/plans/2026-05-04-xopenai.md`
 
 ## 总体进度
 
@@ -35,7 +35,7 @@
 ## 设计阶段 (已完成)
 
 ### ✅ 设计文档
-- **文件**: `docs/superpowers/specs/2026-05-04-anthropic2openai-design.md`
+- **文件**: `docs/superpowers/specs/2026-05-04-xopenai-design.md`
 - **状态**: 已批准
 - **提交**: `a9621ca`
 - **内容**:
@@ -48,7 +48,7 @@
   - 安全配置
 
 ### ✅ 实现计划
-- **文件**: `docs/superpowers/plans/2026-05-04-anthropic2openai.md`
+- **文件**: `docs/superpowers/plans/2026-05-04-xopenai.md`
 - **状态**: 已批准
 - **提交**: `67b2896`
 - **内容**: 19个详细任务，每个任务包含多个步骤
@@ -293,6 +293,6 @@ b35d905 Fix second round of spec review issues
 
 ## 参考资料
 
-- 设计文档: `docs/superpowers/specs/2026-05-04-anthropic2openai-design.md`
-- 实现计划: `docs/superpowers/plans/2026-05-04-anthropic2openai.md`
+- 设计文档: `docs/superpowers/specs/2026-05-04-xopenai-design.md`
+- 实现计划: `docs/superpowers/plans/2026-05-04-xopenai.md`
 - 开源参考: https://github.com/BerriAI/litellm

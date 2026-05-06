@@ -193,7 +193,7 @@ If a model is not in the mapping, the original model name is passed through.
 ```
 
 **Features:**
-- Daily rotation: `logs/anthropic2openai-2026-05-04.log`
+- Daily rotation: `logs/xopenai-2026-05-04.log`
 - Includes: timestamp, level, class:line, message
 - Structured logging: key parameters, error details as JSON
 - Log levels: DEBUG, INFO, WARNING, ERROR (configurable)
@@ -201,7 +201,7 @@ If a model is not in the mapping, the original model name is passed through.
 ## Project Structure
 
 ```
-anthropic2openai/
+xopenai/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI application entry
@@ -237,7 +237,7 @@ anthropic2openai/
 ├── docs/                    # Documentation
 │   └── superpowers/         # Superpowers documentation
 │       └── specs/           # Specification documents
-│           └── 2026-05-04-anthropic2openai-design.md  # Design document (this file)
+│           └── 2026-05-04-xopenai-design.md  # Design document (this file)
 ├── .gitignore
 ├── pyproject.toml           # Project configuration
 ├── Dockerfile
@@ -382,19 +382,19 @@ To prevent memory issues:
 
 ```python
 # Request count
-anthropic2openai_requests_total{method, endpoint, status}
+xopenai_requests_total{method, endpoint, status}
 
 # Request duration
-anthropic2openai_request_duration_seconds{method, endpoint}
+xopenai_request_duration_seconds{method, endpoint}
 
 # Conversion errors
-anthropic2openai_conversion_errors_total{converter, error_type}
+xopenai_conversion_errors_total{converter, error_type}
 
 # Retry count
-anthropic2openai_retries_total{endpoint}
+xopenai_retries_total{endpoint}
 
 # Active connections
-anthropic2openai_active_connections
+xopenai_active_connections
 ```
 
 ### Health Check Endpoints
