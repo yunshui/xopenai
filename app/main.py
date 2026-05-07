@@ -9,6 +9,8 @@ from app.config import Settings
 from app.logger import setup_logging, get_logger
 from app.routes.health import router as health_router
 from app.routes.v1 import router as v1_router, set_services, set_limiter
+from contextlib import asynccontextmanager
+
 from app.services.messages import AnthropicMessagesService
 from app.services.models import AnthropicModelsService
 import uuid
@@ -25,7 +27,17 @@ limiter = Limiter(key_func=get_remote_address)
 messages_service = AnthropicMessagesService(settings)
 models_service = AnthropicModelsService(settings)
 
-app = FastAPI(title="Anthropic to OpenAI API Proxy", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting up")
+    yield
+    await messages_service.close()
+    await models_service.close()
+    logger.info("Shutting down")
+
+
+app = FastAPI(title="Anthropic to OpenAI API Proxy", version="0.1.0", lifespan=lifespan)
 
 # Set limiter state
 app.state.limiter = limiter
@@ -96,13 +108,3 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Routes
 app.include_router(health_router)
 app.include_router(v1_router)
-
-@app.on_event("startup")
-async def startup():
-    logger.info("Starting up")
-
-@app.on_event("shutdown")
-async def shutdown():
-    await messages_service.close()
-    await models_service.close()
-    logger.info("Shutting down")
